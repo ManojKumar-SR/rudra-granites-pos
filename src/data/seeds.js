@@ -6,8 +6,8 @@ export const INITIAL_PRODUCTS = [
 ];
 
 export const INITIAL_CUSTOMERS = [
-  { id: "c1", name: "LOBI DHAS", mobile: "9876543210", gstin: "33AFZPL5401L1Z2", address: "PULLUVILAI, VEEYANOOR", state: "33", creditLimit: 500000, outstanding: 0, addresses: [{ label: "Primary", address: "PULLUVILAI, VEEYANOOR" }] },
-  { id: "c2", name: "KUMAR TRADERS", mobile: "9876543211", gstin: "33BXYPS1234A1Z5", address: "NAGERCOIL", state: "33", creditLimit: 300000, outstanding: 50000, addresses: [{ label: "Primary", address: "NAGERCOIL" }] },
+  { id: "c1", name: "LOBI DHAS", mobile: "9876543210", gstin: "33AFZPL5401L1Z2", address: "PULLUVILAI, VEEYANOOR", city: "VEEYANOOR", pin: 629177, state: "33", creditLimit: 500000, outstanding: 0, addresses: [{ label: "Primary", address: "PULLUVILAI, VEEYANOOR" }] },
+  { id: "c2", name: "KUMAR TRADERS", mobile: "9876543211", gstin: "33BXYPS1234A1Z5", address: "NAGERCOIL", city: "NAGERCOIL", pin: 629001, state: "33", creditLimit: 300000, outstanding: 50000, addresses: [{ label: "Primary", address: "NAGERCOIL" }] },
 ];
 
 export const INITIAL_SUPPLIERS = [

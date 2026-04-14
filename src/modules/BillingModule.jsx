@@ -6,6 +6,7 @@ import { useState } from "react";
 import { generateId, today } from "../utils/helpers";
 import { formatCurrency, formatDate, numberToWords } from "../utils/formatters";
 import { STATES } from "../constants";
+import QRCode from "qrcode.react";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -26,7 +27,7 @@ export const BillingModule = ({ products, setProducts, customers, invoices, setI
       <Tabs tabs={[{ key: "create", label: "Create Invoice" }, { key: "list", label: "Invoice List" }]} active={tab} onChange={setTab} />
       <div className="mt-4">
         {tab === "create" ? <InvoiceCreator products={products} setProducts={setProducts} customers={customers} invoices={invoices} setInvoices={setInvoices} company={company} /> :
-          <InvoiceList invoices={invoices} customers={customers} onView={setShowInvoice} />}
+          <InvoiceList invoices={invoices} customers={customers} onView={setShowInvoice} setInvoices={setInvoices} />}
       </div>
       <Modal open={!!showInvoice} onClose={() => setShowInvoice(null)} title={`Invoice #${showInvoice?.invoiceNo}`} size="lg">
         <InvoicePrintView invoice={showInvoice} company={company} customer={customers.find(c => c.id === showInvoice?.customerId)} />
@@ -39,6 +40,7 @@ const InvoiceCreator = ({ products, setProducts, customers, invoices, setInvoice
   const nextInvoiceNo = invoices.length > 0 ? Math.max(...invoices.map(i => parseInt(i.invoiceNo))) + 1 : 4960;
   const [form, setForm] = useState({ customerId: "", invoiceType: "tax", date: today(), deliveryNote: "", paymentTerms: "", items: [] });
   const [itemForm, setItemForm] = useState({ productId: "", qty: "" });
+  const [showPreview, setShowPreview] = useState(false);
   const selectedProduct = products.find(p => p.id === itemForm.productId);
   const selectedCustomer = customers.find(c => c.id === form.customerId);
   const isInterState = selectedCustomer && selectedCustomer.state !== company.stateCode;
@@ -149,22 +151,75 @@ const InvoiceCreator = ({ products, setProducts, customers, invoices, setInvoice
               <div className="flex justify-between w-full max-w-xs border-t pt-2 mt-2 font-bold text-base"><span>Total:</span><span className="tabular-nums">{formatCurrency(total)}</span></div>
             </div>
             <div className="flex justify-end gap-3 mt-4">
-              <Button variant="secondary"><Icons.printer size={14} /> Preview</Button>
+              <Button variant="secondary" onClick={() => setShowPreview(true)}><Icons.printer size={14} /> Preview</Button>
               <Button onClick={saveInvoice}><Icons.check size={14} /> Save Invoice</Button>
             </div>
           </div>
         </Card>
       )}
+
+      <Modal open={showPreview} onClose={() => setShowPreview(false)} title={`Invoice Preview #${nextInvoiceNo}`} size="lg">
+        <InvoicePrintView invoice={{ invoiceNo: nextInvoiceNo, ...form, subtotal, cgst, sgst, igst, totalTax: totalTax, total, status: "preview", jsonConverted: false }} company={company} customer={selectedCustomer} />
+      </Modal>
     </div>
   );
 };
 
-const InvoiceList = ({ invoices, customers, onView }) => {
+const InvoiceList = ({ invoices, customers, onView, setInvoices }) => {
   const [search, setSearch] = useState("");
+  const [uploadingId, setUploadingId] = useState(null);
   const filtered = invoices.filter(inv => {
     const cust = customers.find(c => c.id === inv.customerId);
     return inv.invoiceNo.includes(search) || cust?.name.toLowerCase().includes(search.toLowerCase());
   });
+
+  const handleUploadSigned = (invoiceId) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const data = JSON.parse(evt.target?.result || "");
+
+          // Portal response is an object (not array for single invoice)
+          const response = Array.isArray(data) ? data[0] : data;
+
+          if (!response.Irn) {
+            alert("Invalid response: Missing IRN field");
+            return;
+          }
+
+          setInvoices(prev => prev.map(inv =>
+            inv.id === invoiceId
+              ? {
+                  ...inv,
+                  irn: response.Irn,
+                  ackNo: response.AckNo,
+                  ackDate: response.AckDt,
+                  status: response.Status || "ACT",
+                  signedInvoice: response.SignedInvoice,
+                  signedQRCode: response.SignedQRCode,
+                  ewbNo: response.EwbNo,
+                  ewbDt: response.EwbDt,
+                  jsonSigned: true
+                }
+              : inv
+          ));
+          alert(`Invoice #${invoices.find(i => i.id === invoiceId)?.invoiceNo} updated with IRN`);
+          setUploadingId(null);
+        } catch (err) {
+          alert(`Invalid JSON: ${err.message}`);
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
 
   return (
     <Card title="Invoices" actions={<SearchBar value={search} onChange={setSearch} placeholder="Search invoice..." />}>
@@ -173,8 +228,14 @@ const InvoiceList = ({ invoices, customers, onView }) => {
         { key: "date", label: "Date", render: (r) => formatDate(r.date) },
         { key: "customer", label: "Customer", render: (r) => customers.find(c => c.id === r.customerId)?.name || "—" },
         { key: "total", label: "Total", align: "right", render: (r) => <span className="font-semibold">{formatCurrency(r.total)}</span> },
-        { key: "status", label: "Status", render: (r) => <Badge variant={r.status === "active" ? "success" : "danger"}>{r.status}</Badge> },
-        { key: "actions", label: "", render: (r) => <Button size="sm" variant="ghost" onClick={() => onView(r)}><Icons.file size={14} /> View</Button> },
+        { key: "irn", label: "IRN", render: (r) => r.irn ? <span className="font-mono text-xs text-green-700 font-medium truncate" title={r.irn}>{r.irn.substring(0, 16)}...</span> : <span className="text-gray-400 text-sm">—</span> },
+        { key: "status", label: "Status", render: (r) => r.irn ? <Badge variant="success">✓ Signed</Badge> : <Badge variant="warning">⧗ Pending</Badge> },
+        { key: "actions", label: "", render: (r) => (
+          <div className="flex items-center gap-1">
+            {!r.irn && <Button size="sm" variant="ghost" onClick={() => handleUploadSigned(r.id)} title="Upload signed JSON from portal"><Icons.download size={14} /> Sign</Button>}
+            <Button size="sm" variant="ghost" onClick={() => onView(r)}><Icons.file size={14} /> View</Button>
+          </div>
+        )},
       ]} data={filtered} emptyMsg="No invoices yet" />
     </Card>
   );
@@ -192,10 +253,22 @@ const InvoicePrintView = ({ invoice, company, customer }) => {
     <div className="bg-white p-6 text-xs" id="invoice-print">
       <div className="border border-gray-800">
         <div className="text-center py-2 border-b border-gray-800 font-bold text-sm">Tax Invoice</div>
-        <div className="px-3 py-1 border-b border-gray-800 text-[10px]">
-          <div>IRN : {invoice.irn || "Pending — generate via E-Invoice module"}</div>
-          <div>Ack No. : {invoice.ackNo || "—"}</div>
-          <div>Ack Date : {invoice.ackDate ? formatDate(invoice.ackDate) : "—"}</div>
+        <div className="grid grid-cols-3 border-b border-gray-800">
+          <div className="px-3 py-2 border-r border-gray-800 text-[10px]">
+            <div><strong>IRN</strong></div>
+            <div className="font-mono text-[9px] break-all">{invoice.irn ? invoice.irn : "Pending"}</div>
+            <div className="mt-1 text-[9px]"><strong>Ack No.</strong> {invoice.ackNo || "—"}</div>
+            <div className="text-[9px]"><strong>Ack Date</strong> {invoice.ackDate ? formatDate(invoice.ackDate) : "—"}</div>
+          </div>
+          <div className="px-3 py-2 border-r border-gray-800 text-[10px]">
+            <div><strong>Status</strong></div>
+            <div className="mt-1">{invoice.irn ? <span className="text-green-700 font-bold">✓ SIGNED</span> : <span className="text-yellow-700">⧗ Pending IRN</span>}</div>
+          </div>
+          {invoice.signedQRCode && (
+            <div className="px-3 py-2 flex items-center justify-center bg-gray-50">
+              <QRCode value={invoice.signedQRCode} size={80} level="M" />
+            </div>
+          )}
         </div>
         <div className="grid grid-cols-2 border-b border-gray-800">
           <div className="p-3 border-r border-gray-800">

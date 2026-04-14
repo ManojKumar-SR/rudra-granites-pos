@@ -9,7 +9,9 @@ export const TRANSPORT_MODES = ["Road", "Rail", "Air", "Ship"];
 
 export const COMPANY = {
   name: "RUDRA GRANITES & TILES",
-  address: "P/ARAICODE, THUCKALAY, KANYAKUMARI DIST-629175",
+  address: "P/ARAICODE, THUCKALAY, KANYAKUMARI DIST",
+  city: "THUCKALAY",
+  pin: 629175,
   gstin: "33AAYFR4969H1ZE",
   state: "33", stateCode: "33", stateName: "Tamil Nadu",
   email: "rudragranite001@gmail.com", phone: "9876543210",

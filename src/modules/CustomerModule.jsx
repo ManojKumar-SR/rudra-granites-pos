@@ -88,7 +88,7 @@ export const CustomerModule = ({ customers, setCustomers, suppliers, setSupplier
 };
 
 export const PartyForm = ({ entity, isCustomer, onSave, onCancel }) => {
-  const [f, setF] = useState(entity || { name: "", mobile: "", gstin: "", address: "", state: "33", creditLimit: isCustomer ? 100000 : undefined, outstanding: 0, addresses: [{ label: "Primary", address: "" }] });
+  const [f, setF] = useState(entity || { name: "", mobile: "", gstin: "", address: "", city: "", pin: "", state: "33", creditLimit: isCustomer ? 100000 : undefined, outstanding: 0, addresses: [{ label: "Primary", address: "" }] });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const [gstinValid, setGstinValid] = useState(null);
 
@@ -105,11 +105,13 @@ export const PartyForm = ({ entity, isCustomer, onSave, onCancel }) => {
         </div>
         <Select label="State" options={STATES.map(s => ({ value: s.code, label: `${s.name} (${s.code})` }))} value={f.state} onChange={e => set("state", e.target.value)} />
         <Input label="Address" value={f.address} onChange={e => set("address", e.target.value)} className="sm:col-span-2" />
+        <Input label="City *" value={f.city} onChange={e => set("city", e.target.value)} placeholder="e.g., NAGERCOIL" />
+        <Input label="Postal Code *" type="number" value={f.pin} onChange={e => set("pin", e.target.value)} placeholder="e.g., 629001" />
         {isCustomer && <Input label="Credit Limit (₹)" type="number" value={f.creditLimit} onChange={e => set("creditLimit", parseFloat(e.target.value) || 0)} />}
       </div>
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="secondary" onClick={onCancel}>Cancel</Button>
-        <Button onClick={() => onSave(f)} disabled={!f.name || !f.mobile}><Icons.check size={14} /> Save</Button>
+        <Button onClick={() => onSave(f)} disabled={!f.name || !f.mobile || !f.city || !f.pin}><Icons.check size={14} /> Save</Button>
       </div>
     </div>
   );
