@@ -16,6 +16,7 @@ import {
   INITIAL_PRODUCTS,
   INITIAL_CUSTOMERS,
   INITIAL_SUPPLIERS,
+  INITIAL_TRANSPORTERS,
 } from "./data/seeds";
 
 // ─── UI COMPONENTS ───────────────────────────────────────────────────────────
@@ -37,6 +38,7 @@ import { SearchBar } from "./components/ui/SearchBar";
 import { Dashboard } from "./modules/DashBoard";
 import { DispatchModule } from "./modules/DispatchModule";
 import { CustomerModule } from "./modules/CustomerModule";
+import { TransporterModule } from "./modules/TransporterModule";
 import { ReportsModule } from "./modules/ReportsModule";
 import { GSTModule } from "./modules/GSTModule";
 import { AdminModule } from "./modules/AdminModules";
@@ -65,6 +67,7 @@ const NAV_ITEMS = [
   { key: "einvoice", label: "E-Invoice", icon: Icons.qr },
   { key: "dispatch", label: "Dispatch", icon: Icons.map },
   { key: "customers", label: "Parties", icon: Icons.users },
+  { key: "transporters", label: "Transporters", icon: Icons.truck },
   { key: "reports", label: "Reports", icon: Icons.chart },
   { key: "admin", label: "Admin", icon: Icons.settings },
 ];
@@ -77,6 +80,7 @@ export default function App() {
   const [products, setProducts] = useState(INITIAL_PRODUCTS);
   const [customers, setCustomers] = useState(INITIAL_CUSTOMERS);
   const [suppliers, setSuppliers] = useState(INITIAL_SUPPLIERS);
+  const [transporters, setTransporters] = useState(INITIAL_TRANSPORTERS);
   const [invoices, setInvoices] = useState([]);
   const [purchases, setPurchases] = useState([]);
   const [eWayBills, setEWayBills] = useState([]);
@@ -99,10 +103,11 @@ export default function App() {
       case "inventory": return <InventoryModule products={products} setProducts={setProducts} />;
       case "purchase": return <PurchaseModule products={products} setProducts={setProducts} suppliers={suppliers} purchases={purchases} setPurchases={setPurchases} />;
       case "gst": return <GSTModule products={products} invoices={invoices} company={COMPANY} />;
-      case "eway": return <EWayModule invoices={invoices} customers={customers} eWayBills={eWayBills} setEWayBills={setEWayBills} company={COMPANY} />;
+      case "eway": return <EWayModule invoices={invoices} customers={customers} transporters={transporters} setInvoices={setInvoices} />;
       case "einvoice": return <EInvoiceModule invoices={invoices} setInvoices={setInvoices} company={COMPANY} customers={customers} />;
       case "dispatch": return <DispatchModule invoices={invoices} dispatches={dispatches} setDispatches={setDispatches} />;
       case "customers": return <CustomerModule customers={customers} setCustomers={setCustomers} suppliers={suppliers} setSuppliers={setSuppliers} invoices={invoices} />;
+      case "transporters": return <TransporterModule transporters={transporters} setTransporters={setTransporters} />;
       case "reports": return <ReportsModule invoices={invoices} products={products} purchases={purchases} eWayBills={eWayBills} />;
       case "admin": return <AdminModule gspConfig={gspConfig} setGspConfig={setGspConfig} />;
       default: return <Dashboard invoices={invoices} products={products} purchases={purchases} eWayBills={eWayBills} />;
