@@ -1,13 +1,14 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // MODULE 10: REPORTS & ANALYTICS
 // ═══════════════════════════════════════════════════════════════════════════════
-import { formatCurrency } from "../utils/formatters";
+import { formatCurrency, formatDate } from "../utils/formatters";
 import { Badge } from "../components/ui/Badge";
 import { Card } from "../components/ui/Card";
 import { Stat } from "../components/ui/Stat";
 import { Table } from "../components/ui/Table";
 import { Tabs } from "../components/ui/Tabs";
 import { Icons } from "../components/ui/Icons";
+import { useState } from "react";
 
 export const ReportsModule = ({ invoices, products, purchases, eWayBills }) => {
   const [tab, setTab] = useState("sales");

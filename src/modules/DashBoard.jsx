@@ -2,7 +2,7 @@
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { formatCurrency } from "../utils/formatters";
+import { formatCurrency, formatDate } from "../utils/formatters";
 import { Stat } from "../components/ui/Stat";
 import { Card } from "../components/ui/Card";
 import { Table } from "../components/ui/Table";

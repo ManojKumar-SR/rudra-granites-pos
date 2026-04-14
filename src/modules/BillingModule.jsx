@@ -71,9 +71,8 @@ const InvoiceCreator = ({ products, setProducts, customers, invoices, setInvoice
     const inv = {
       id: generateId(), invoiceNo: String(nextInvoiceNo), ...form,
       subtotal, cgst, sgst, igst, totalTax, total,
-      irn: Math.random().toString(16).substr(2, 40),
-      ackNo: Math.floor(Math.random() * 9e14) + 1e14,
-      status: "active", createdAt: new Date().toISOString()
+      status: "active", createdAt: new Date().toISOString(),
+      jsonConverted: false,
     };
     // Deduct stock
     const updatedProducts = [...products];
@@ -192,15 +191,12 @@ const InvoicePrintView = ({ invoice, company, customer }) => {
   return (
     <div className="bg-white p-6 text-xs" id="invoice-print">
       <div className="border border-gray-800">
-        {/* Header */}
         <div className="text-center py-2 border-b border-gray-800 font-bold text-sm">Tax Invoice</div>
-        {/* IRN & Ack */}
         <div className="px-3 py-1 border-b border-gray-800 text-[10px]">
-          <div>IRN : {invoice.irn || "—"}</div>
+          <div>IRN : {invoice.irn || "Pending — generate via E-Invoice module"}</div>
           <div>Ack No. : {invoice.ackNo || "—"}</div>
-          <div>Ack Date : {invoice.date ? formatDate(invoice.date) : "—"}</div>
+          <div>Ack Date : {invoice.ackDate ? formatDate(invoice.ackDate) : "—"}</div>
         </div>
-        {/* Company + Invoice Details */}
         <div className="grid grid-cols-2 border-b border-gray-800">
           <div className="p-3 border-r border-gray-800">
             <div className="font-bold">{company.name}</div>
@@ -220,7 +216,6 @@ const InvoicePrintView = ({ invoice, company, customer }) => {
             <div className="p-2"><span className="text-gray-500">Dated</span></div>
           </div>
         </div>
-        {/* Consignee / Buyer */}
         <div className="grid grid-cols-2 border-b border-gray-800">
           <div className="p-3 border-r border-gray-800">
             <div className="text-gray-500 text-[10px]">Consignee (Ship to)</div>
@@ -243,7 +238,6 @@ const InvoicePrintView = ({ invoice, company, customer }) => {
           <div>GSTIN/UIN : {buyer?.gstin}</div>
           <div>State Name : {STATES.find(s => s.code === buyer?.state)?.name}, Code : {buyer?.state}</div>
         </div>
-        {/* Items Table */}
         <table className="w-full border-collapse">
           <thead>
             <tr className="border-b border-gray-800 bg-gray-50">
@@ -270,7 +264,6 @@ const InvoicePrintView = ({ invoice, company, customer }) => {
                 <td className="p-1.5 text-right font-bold">{formatCurrency(item.amount)}</td>
               </tr>
             ))}
-            {/* Tax Rows */}
             {!isInterState ? (
               <>
                 <tr className="border-b border-gray-800">
@@ -305,12 +298,10 @@ const InvoicePrintView = ({ invoice, company, customer }) => {
             </tr>
           </tfoot>
         </table>
-        {/* Amount in Words */}
         <div className="px-3 py-2 border-t border-gray-800 text-[10px]">
           <span className="text-gray-500">Amount Chargeable (in words)</span><br />
           <strong>INR {numberToWords(invoice.total)} Only</strong>
         </div>
-        {/* Tax Breakdown Table */}
         <div className="border-t border-gray-800">
           <table className="w-full text-[10px] border-collapse">
             <thead>
@@ -350,7 +341,6 @@ const InvoicePrintView = ({ invoice, company, customer }) => {
             </tbody>
           </table>
         </div>
-        {/* Footer */}
         <div className="grid grid-cols-2 border-t border-gray-800">
           <div className="p-3 border-r border-gray-800 text-[10px]">
             <div className="font-bold mb-1">Declaration</div>
@@ -366,6 +356,3 @@ const InvoicePrintView = ({ invoice, company, customer }) => {
     </div>
   );
 };
-
-
-

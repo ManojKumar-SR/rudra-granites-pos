@@ -99,8 +99,8 @@ export default function App() {
       case "inventory": return <InventoryModule products={products} setProducts={setProducts} />;
       case "purchase": return <PurchaseModule products={products} setProducts={setProducts} suppliers={suppliers} purchases={purchases} setPurchases={setPurchases} />;
       case "gst": return <GSTModule products={products} invoices={invoices} company={COMPANY} />;
-      case "eway": return <EWayModule invoices={invoices} customers={customers} eWayBills={eWayBills} setEWayBills={setEWayBills} company={COMPANY} gspConfig={gspConfig} />;
-      case "einvoice": return <EInvoiceModule invoices={invoices} setInvoices={setInvoices} gspConfig={gspConfig} company={COMPANY} customers={customers} />;
+      case "eway": return <EWayModule invoices={invoices} customers={customers} eWayBills={eWayBills} setEWayBills={setEWayBills} company={COMPANY} />;
+      case "einvoice": return <EInvoiceModule invoices={invoices} setInvoices={setInvoices} company={COMPANY} customers={customers} />;
       case "dispatch": return <DispatchModule invoices={invoices} dispatches={dispatches} setDispatches={setDispatches} />;
       case "customers": return <CustomerModule customers={customers} setCustomers={setCustomers} suppliers={suppliers} setSuppliers={setSuppliers} invoices={invoices} />;
       case "reports": return <ReportsModule invoices={invoices} products={products} purchases={purchases} eWayBills={eWayBills} />;

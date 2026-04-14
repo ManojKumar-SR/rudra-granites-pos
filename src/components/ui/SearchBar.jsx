@@ -1,3 +1,5 @@
+import { Icons } from "./Icons";
+
 export const SearchBar = ({ value, onChange, placeholder = "Search..." }) => (
   <div className="relative">
     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><Icons.search size={14} /></span>

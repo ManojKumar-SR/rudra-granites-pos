@@ -1,196 +1,299 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// MODULE 7: E-INVOICE COMPLIANCE (MasterIndia GSP API Integration)
+// MODULE 7: E-INVOICE (JSON Generation for IRP Portal Upload)
 // ═══════════════════════════════════════════════════════════════════════════════
-import { useState } from "react";
+
+import { useState, useMemo } from "react";
 import { formatCurrency, formatDate } from "../utils/formatters";
+import { STATES } from "../constants";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Modal } from "../components/ui/Modal";
-import { Table } from "../components/ui/Table";
 import { Tabs } from "../components/ui/Tabs";
 import { Icons } from "../components/ui/Icons";
 
-export const EInvoiceModule = ({ invoices, setInvoices, gspConfig, company, customers }) => {
-  const [tab, setTab] = useState("list");
-  const [loading, setLoading] = useState({});
-  const [viewIrn, setViewIrn] = useState(null);
+const getDateLabel = (dateStr) => {
+  const now = new Date();
+  const todayStr = now.toISOString().split("T")[0];
+  const yesterdayStr = new Date(now.getTime() - 86400000).toISOString().split("T")[0];
+  const invoiceDateStr = new Date(dateStr).toISOString().split("T")[0];
+  if (invoiceDateStr === todayStr) return "Today";
+  if (invoiceDateStr === yesterdayStr) return "Yesterday";
+  return "";
+};
 
-  const isConnected = gspConfig?.apiKey && gspConfig?.gstin;
+const getDateKey = (dateStr) => new Date(dateStr).toISOString().split("T")[0];
 
-  // POST /eInvoice/v1.03/authenticate → then POST /eInvoice/v1.03/eInvoice/generate
-  const generateIRN = async (invoiceId) => {
-    setLoading(prev => ({ ...prev, [invoiceId]: true }));
-    try {
-      // TODO: Backend will call MasterIndia API
-      // Step 1: Authenticate → POST /eInvoice/v1.03/authenticate
-      // Step 2: Generate IRN → POST /eInvoice/v1.03/eInvoice/generate
-      // Response includes: irn, ackNo, ackDate, signedInvoice, signedQRCode
-      const irn = Array.from({ length: 64 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");
-      const ackNo = Math.floor(Math.random() * 9e14) + 1e14;
-      setInvoices(prev => prev.map(inv => inv.id === invoiceId ? {
-        ...inv, irn, ackNo: String(ackNo), ackDate: new Date().toISOString(),
-        einvoiceStatus: "generated", apiSource: "masterindia_gsp",
-        signedQRCode: `SIGNED_QR_${irn.slice(0, 20)}`, // Backend returns actual signed QR
-      } : inv));
-    } catch (err) {
-      setInvoices(prev => prev.map(inv => inv.id === invoiceId ? { ...inv, einvoiceStatus: "failed", einvoiceError: err.message } : inv));
-    }
-    setLoading(prev => ({ ...prev, [invoiceId]: false }));
+const groupByDate = (invoices) => {
+  const groups = {};
+  const sorted = [...invoices].sort((a, b) => new Date(b.date) - new Date(a.date));
+  sorted.forEach((inv) => {
+    const key = getDateKey(inv.date);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(inv);
+  });
+  return groups;
+};
+
+const buildEInvoiceJSON = (invoice, company, customer) => {
+  const isInterState = customer?.state !== company.stateCode;
+  return {
+    Version: "1.1",
+    TranDtls: { TaxSch: "GST", SupTyp: isInterState ? "INTER" : "INTRA", RegRev: "N", IgstOnIntra: "N" },
+    DocDtls: { Typ: "INV", No: invoice.invoiceNo, Dt: new Date(invoice.date).toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" }) },
+    SellerDtls: { Gstin: company.gstin, LglNm: company.name, Addr1: company.address, Loc: "THUCKALAY", Pin: 629175, Stcd: company.stateCode },
+    BuyerDtls: { Gstin: customer?.gstin || "URP", LglNm: customer?.name || "", Addr1: customer?.address || "", Loc: customer?.address?.split(",")[0] || "", Pin: 629169, Stcd: customer?.state || "", Pos: customer?.state || company.stateCode },
+    ItemList: invoice.items.map((item, idx) => ({
+      SlNo: String(idx + 1), PrdDesc: item.name, IsServc: "N", HsnCd: item.hsn, Qty: item.qty,
+      Unit: item.unit === "sqf" ? "SQF" : item.unit === "piece" ? "PCS" : "NOS",
+      UnitPrice: item.rate, TotAmt: item.amount, AssAmt: item.amount, GstRt: item.taxRate,
+      IgstAmt: isInterState ? item.amount * item.taxRate / 100 : 0,
+      CgstAmt: !isInterState ? item.amount * item.taxRate / 200 : 0,
+      SgstAmt: !isInterState ? item.amount * item.taxRate / 200 : 0,
+      CesRt: 0, CesAmt: 0, TotItemVal: item.amount + (item.amount * item.taxRate / 100),
+    })),
+    ValDtls: { AssVal: invoice.subtotal, CgstVal: invoice.cgst || 0, SgstVal: invoice.sgst || 0, IgstVal: invoice.igst || 0, CesVal: 0, Discount: 0, OthChrg: 0, TotInvVal: invoice.total },
+  };
+};
+
+export const EInvoiceModule = ({ invoices, setInvoices, company, customers }) => {
+  const [tab, setTab] = useState("invoices");
+  // Separate selection state for each tab
+  const [convertSelection, setConvertSelection] = useState(new Set());
+  const [exportSelection, setExportSelection] = useState(new Set());
+  const [viewJson, setViewJson] = useState(null);
+
+  const converted = invoices.filter((inv) => inv.jsonConverted);
+  const unconverted = invoices.filter((inv) => !inv.jsonConverted);
+  const allGroups = useMemo(() => groupByDate(invoices), [invoices]);
+  const convertedGroups = useMemo(() => groupByDate(converted), [converted]);
+
+  // ─── Tab 1 selection (convert) ──────────────────────────────────────────
+  const toggleConvert = (id) => {
+    const inv = invoices.find(i => i.id === id);
+    if (inv?.jsonConverted) return;
+    setConvertSelection((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  };
+  const toggleConvertDateGroup = (dateKey) => {
+    const group = (allGroups[dateKey] || []).filter(inv => !inv.jsonConverted);
+    if (!group.length) return;
+    const all = group.every((inv) => convertSelection.has(inv.id));
+    setConvertSelection((prev) => { const n = new Set(prev); group.forEach((inv) => { if (all) n.delete(inv.id); else n.add(inv.id); }); return n; });
+  };
+  const selectAllConvert = () => {
+    if (convertSelection.size === unconverted.length) setConvertSelection(new Set());
+    else setConvertSelection(new Set(unconverted.map((inv) => inv.id)));
+  };
+  const convertSelected = () => {
+    if (convertSelection.size === 0) return;
+    setInvoices((prev) => prev.map((inv) => convertSelection.has(inv.id) ? { ...inv, jsonConverted: true, jsonConvertedAt: new Date().toISOString() } : inv));
+    setConvertSelection(new Set());
   };
 
-  // POST /eInvoice/v1.03/eInvoice/cancel
-  const cancelIRN = (invoiceId) => {
-    const reason = prompt("Cancellation reason:\n1 - Duplicate\n2 - Data Entry Mistake\n\nEnter reason number:");
-    if (!reason) return;
-    // TODO: Backend calls POST /eInvoice/v1.03/eInvoice/cancel
-    setInvoices(prev => prev.map(inv => inv.id === invoiceId ? {
-      ...inv, einvoiceStatus: "cancelled", irnCancelledAt: new Date().toISOString(),
-      irnCancelReason: reason === "1" ? "Duplicate" : "Data Entry Mistake",
-    } : inv));
+  // ─── Tab 2 selection (export) ───────────────────────────────────────────
+  const toggleExport = (id) => {
+    setExportSelection((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  };
+  const toggleExportDateGroup = (dateKey) => {
+    const group = convertedGroups[dateKey] || [];
+    if (!group.length) return;
+    const all = group.every((inv) => exportSelection.has(inv.id));
+    setExportSelection((prev) => { const n = new Set(prev); group.forEach((inv) => { if (all) n.delete(inv.id); else n.add(inv.id); }); return n; });
+  };
+  const selectAllExport = () => {
+    if (exportSelection.size === converted.length) setExportSelection(new Set());
+    else setExportSelection(new Set(converted.map((inv) => inv.id)));
   };
 
-  // POST /eInvoice/v1.03/eInvoice/generateEwayBill (generate EWB from IRN)
-  const generateEWBfromIRN = (invoiceId) => {
-    alert("E-Way Bill generation from IRN — Backend will call POST /eInvoice/v1.03/eInvoice/generateEwayBill with the IRN. This creates the E-Way Bill automatically from the e-Invoice data.");
+  // ─── Download JSON ──────────────────────────────────────────────────────
+  const downloadJSON = (invoicesToExport) => {
+    const jsonPayload = invoicesToExport.map((inv) => {
+      const customer = customers.find((c) => c.id === inv.customerId);
+      return buildEInvoiceJSON(inv, company, customer);
+    });
+    const blob = new Blob([JSON.stringify(jsonPayload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `e-invoices-${new Date().toISOString().split("T")[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
-  // GET /eInvoice/v1.03/eInvoice/irn/{irn}
-  const fetchIRNDetails = (invoice) => {
-    // TODO: Backend calls GET endpoint with IRN
-    setViewIrn(invoice);
+  const exportSelected = () => {
+    const toExport = converted.filter(inv => exportSelection.has(inv.id));
+    if (toExport.length === 0) return;
+    downloadJSON(toExport);
   };
 
-  const pendingInvoices = invoices.filter(inv => !inv.einvoiceStatus || inv.einvoiceStatus === "failed");
-  const generatedInvoices = invoices.filter(inv => inv.einvoiceStatus === "generated");
-  const cancelledInvoices = invoices.filter(inv => inv.einvoiceStatus === "cancelled");
+  const previewJSON = (inv) => {
+    const customer = customers.find((c) => c.id === inv.customerId);
+    setViewJson({ invoice: inv, json: buildEInvoiceJSON(inv, company, customer) });
+  };
+
+  // ─── Date group renderer ────────────────────────────────────────────────
+  // mode: "convert" = tab1 (checkbox for unconverted only), "export" = tab2 (checkbox for all in group)
+  const renderDateGroup = (dateKey, group, mode) => {
+    const label = getDateLabel(dateKey);
+    const formattedDate = new Date(dateKey).toLocaleDateString("en-IN", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+
+    const sel = mode === "convert" ? convertSelection : exportSelection;
+    const toggleFn = mode === "convert" ? toggleConvert : toggleExport;
+    const toggleGroupFn = mode === "convert" ? toggleConvertDateGroup : toggleExportDateGroup;
+
+    const checkableInGroup = mode === "convert" ? group.filter(inv => !inv.jsonConverted) : group;
+    const allChecked = checkableInGroup.length > 0 && checkableInGroup.every((inv) => sel.has(inv.id));
+    const someChecked = checkableInGroup.some((inv) => sel.has(inv.id));
+
+    return (
+      <div key={dateKey} className="mb-6">
+        <div className="flex items-center gap-3 mb-2 px-1">
+          {checkableInGroup.length > 0 ? (
+            <input type="checkbox" checked={allChecked}
+              ref={(el) => { if (el) el.indeterminate = someChecked && !allChecked; }}
+              onChange={() => toggleGroupFn(dateKey)}
+              className="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-500 cursor-pointer" />
+          ) : <div className="w-4" />}
+          <div>
+            {label && <span className="text-sm font-semibold text-gray-900 mr-2">{label}</span>}
+            <span className="text-sm text-gray-500">{formattedDate}</span>
+            <span className="ml-2 text-xs text-gray-400">({group.length} invoice{group.length > 1 ? "s" : ""})</span>
+          </div>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 bg-gray-50/50">
+                <th className="w-10 px-4 py-3"></th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice #</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Value</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Tax</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th className="px-4 py-3"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {group.map((inv) => {
+                const cust = customers.find((c) => c.id === inv.customerId);
+                const isConverted = inv.jsonConverted;
+                const canCheck = mode === "export" || !isConverted;
+                return (
+                  <tr key={inv.id} className={`hover:bg-gray-50 transition-colors ${mode === "convert" && isConverted ? "opacity-50" : ""}`}>
+                    <td className="px-4 py-3">
+                      {canCheck ? (
+                        <input type="checkbox" checked={sel.has(inv.id)} onChange={() => toggleFn(inv.id)}
+                          className="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-500 cursor-pointer" />
+                      ) : <div className="w-4 h-4" />}
+                    </td>
+                    <td className="px-4 py-3 font-mono font-medium">{inv.invoiceNo}</td>
+                    <td className="px-4 py-3 text-gray-500">{formatDate(inv.date)}</td>
+                    <td className="px-4 py-3">{cust?.name || "—"}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{formatCurrency(inv.subtotal)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{formatCurrency(inv.totalTax)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold">{formatCurrency(inv.total)}</td>
+                    <td className="px-4 py-3">
+                      {isConverted ? <Badge variant="success">JSON Ready</Badge> : <Badge variant="warning">Pending</Badge>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Button size="sm" variant="ghost" onClick={() => previewJSON(inv)}><Icons.file size={14} /> Preview</Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div>
       <Tabs tabs={[
-        { key: "list", label: `All E-Invoices (${invoices.length})` },
-        { key: "pending", label: `Pending IRN (${pendingInvoices.length})` },
-        { key: "export", label: "GST JSON Export" },
-      ]} active={tab} onChange={setTab} />
-
-      {/* GSP Connection Status */}
-      <div className={`mt-3 px-4 py-2.5 rounded-md text-sm flex items-center justify-between ${isConnected ? "bg-emerald-50 border border-emerald-200" : "bg-amber-50 border border-amber-200"}`}>
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${isConnected ? "bg-emerald-500" : "bg-amber-500"}`} />
-          <span className={isConnected ? "text-emerald-700" : "text-amber-700"}>
-            MasterIndia GSP (E-Invoice): {isConnected ? "Connected" : "Not configured — go to Admin → GSP Settings"}
-          </span>
-        </div>
-        {isConnected && <Badge variant="success">IRP Connected</Badge>}
-      </div>
+        { key: "invoices", label: `Invoices (${invoices.length})` },
+        { key: "export", label: `JSON Export (${converted.length})` },
+      ]} active={tab} onChange={(t) => { setTab(t); setExportSelection(new Set()); }} />
 
       <div className="mt-4">
-        {tab === "list" && (
-          <Card title="E-Invoice Status" actions={
-            pendingInvoices.length > 0 && isConnected && (
-              <Button size="sm" onClick={() => pendingInvoices.forEach(inv => generateIRN(inv.id))}>
-                <Icons.check size={14} /> Generate All Pending IRN
-              </Button>
-            )
-          }>
-            <Table columns={[
-              { key: "invoiceNo", label: "Invoice #", render: (r) => <span className="font-mono">{r.invoiceNo}</span> },
-              { key: "date", label: "Date", render: (r) => formatDate(r.date) },
-              { key: "total", label: "Value", align: "right", render: (r) => formatCurrency(r.total) },
-              { key: "irn", label: "IRN", render: (r) => r.irn ? (
-                <span className="font-mono text-[11px] break-all cursor-pointer hover:text-blue-600" onClick={() => fetchIRNDetails(r)} title="Click to view details">{r.irn.slice(0, 20)}...</span>
-              ) : <span className="text-gray-400">—</span> },
-              { key: "ackNo", label: "Ack No.", render: (r) => r.ackNo || "—" },
-              { key: "ackDate", label: "Ack Date", render: (r) => r.ackDate ? formatDate(r.ackDate) : "—" },
-              { key: "einvoiceStatus", label: "Status", render: (r) => {
-                const s = r.einvoiceStatus;
-                if (s === "generated") return <Badge variant="success">IRN Generated</Badge>;
-                if (s === "cancelled") return <Badge variant="danger">Cancelled</Badge>;
-                if (s === "failed") return <Badge variant="danger">Failed</Badge>;
-                return <Badge variant="warning">Pending</Badge>;
-              }},
-              { key: "actions", label: "", render: (r) => (
-                <div className="flex items-center gap-1">
-                  {(!r.einvoiceStatus || r.einvoiceStatus === "failed") && (
-                    <Button size="sm" variant="ghost" onClick={() => generateIRN(r.id)} disabled={loading[r.id] || !isConnected}>
-                      {loading[r.id] ? "..." : <><Icons.check size={14} /> Generate IRN</>}
-                    </Button>
-                  )}
-                  {r.einvoiceStatus === "generated" && (
-                    <>
-                      <Button size="sm" variant="ghost" onClick={() => generateEWBfromIRN(r.id)} title="Generate E-Way Bill from IRN"><Icons.truck size={14} /></Button>
-                      <Button size="sm" variant="ghost" onClick={() => cancelIRN(r.id)} title="Cancel IRN"><Icons.x size={14} /></Button>
-                    </>
-                  )}
-                </div>
-              )},
-            ]} data={invoices} emptyMsg="No invoices created yet" />
-          </Card>
-        )}
-
-        {tab === "pending" && (
-          <Card title="Invoices Pending IRN Generation">
-            {pendingInvoices.length === 0 ? (
-              <EmptyState icon={<Icons.check size={40} />} title="All Caught Up" description="All invoices have IRN generated" />
+        {/* ─── TAB 1: All invoices, select unconverted to convert ────────── */}
+        {tab === "invoices" && (
+          <div>
+            {invoices.length === 0 ? (
+              <Card><EmptyState icon={<Icons.receipt size={40} />} title="No Invoices" description="Create invoices from the Billing module. They will appear here for JSON conversion." /></Card>
             ) : (
-              <Table columns={[
-                { key: "invoiceNo", label: "Invoice #", render: (r) => <span className="font-mono">{r.invoiceNo}</span> },
-                { key: "date", label: "Date", render: (r) => formatDate(r.date) },
-                { key: "total", label: "Value", align: "right", render: (r) => formatCurrency(r.total) },
-                { key: "error", label: "Error", render: (r) => r.einvoiceError ? <span className="text-red-500 text-xs">{r.einvoiceError}</span> : "—" },
-                { key: "action", label: "", render: (r) => (
-                  <Button size="sm" onClick={() => generateIRN(r.id)} disabled={loading[r.id] || !isConnected}>
-                    {loading[r.id] ? "Generating..." : <><Icons.check size={14} /> Generate IRN</>}
+              <>
+                <div className="flex items-center justify-between mb-4 px-1">
+                  <div className="flex items-center gap-3">
+                    {unconverted.length > 0 ? (
+                      <>
+                        <input type="checkbox"
+                          checked={convertSelection.size === unconverted.length && unconverted.length > 0}
+                          ref={(el) => { if (el) el.indeterminate = convertSelection.size > 0 && convertSelection.size < unconverted.length; }}
+                          onChange={selectAllConvert}
+                          className="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-500 cursor-pointer" />
+                        <span className="text-sm text-gray-600">
+                          {convertSelection.size > 0 ? `${convertSelection.size} invoice${convertSelection.size > 1 ? "s" : ""} selected` : `Select all (${unconverted.length} pending)`}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-sm text-gray-500">All invoices have been converted to JSON</span>
+                    )}
+                  </div>
+                  <Button onClick={convertSelected} disabled={convertSelection.size === 0}>
+                    <Icons.check size={14} /> Convert to JSON ({convertSelection.size})
                   </Button>
-                )},
-              ]} data={pendingInvoices} />
+                </div>
+                {Object.keys(allGroups).sort((a, b) => new Date(b) - new Date(a)).map((dateKey) => renderDateGroup(dateKey, allGroups[dateKey], "convert"))}
+              </>
             )}
-          </Card>
+          </div>
         )}
 
+        {/* ─── TAB 2: Only converted, select which to export ────────────── */}
         {tab === "export" && (
-          <Card title="GST Portal JSON Export">
-            <div className="p-6">
-              <EmptyState
-                icon={<Icons.download size={40} />}
-                title="Export for GST Portal"
-                description="Generate government-compatible JSON files for bulk upload to GST portal. Includes all e-Invoice data with IRN, signed QR codes, and Ack details."
-                action={
-                  <div className="flex gap-2">
-                    <Button onClick={() => alert("JSON export generated for " + generatedInvoices.length + " invoices (Demo)")}>
-                      <Icons.download size={14} /> Export E-Invoice JSON ({generatedInvoices.length})
-                    </Button>
+          <div>
+            {converted.length === 0 ? (
+              <Card><EmptyState icon={<Icons.download size={40} />} title="No JSON Files Ready" description="Select invoices from the Invoices tab and convert them to JSON first." /></Card>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-4 px-1">
+                  <div className="flex items-center gap-3">
+                    <input type="checkbox"
+                      checked={exportSelection.size === converted.length && converted.length > 0}
+                      ref={(el) => { if (el) el.indeterminate = exportSelection.size > 0 && exportSelection.size < converted.length; }}
+                      onChange={selectAllExport}
+                      className="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-500 cursor-pointer" />
+                    <span className="text-sm text-gray-600">
+                      {exportSelection.size > 0 ? `${exportSelection.size} invoice${exportSelection.size > 1 ? "s" : ""} selected` : `Select all (${converted.length} ready)`}
+                    </span>
                   </div>
-                }
-              />
-            </div>
-          </Card>
+                  <Button onClick={exportSelected} disabled={exportSelection.size === 0}>
+                    <Icons.download size={14} /> Export Selected JSON ({exportSelection.size})
+                  </Button>
+                </div>
+                {Object.keys(convertedGroups).sort((a, b) => new Date(b) - new Date(a)).map((dateKey) => renderDateGroup(dateKey, convertedGroups[dateKey], "export"))}
+              </>
+            )}
+          </div>
         )}
       </div>
 
-      {/* IRN Details Modal */}
-      <Modal open={!!viewIrn} onClose={() => setViewIrn(null)} title={`IRN Details — Invoice #${viewIrn?.invoiceNo}`} size="md">
-        {viewIrn && (
+      {/* ─── JSON Preview Modal ──────────────────────────────────────────── */}
+      <Modal open={!!viewJson} onClose={() => setViewJson(null)} title={`JSON Preview — Invoice #${viewJson?.invoice?.invoiceNo}`} size="lg">
+        {viewJson && (
           <div className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-              <div className="p-3 bg-gray-50 rounded"><span className="text-gray-500 block mb-1">Invoice No.</span><strong>{viewIrn.invoiceNo}</strong></div>
-              <div className="p-3 bg-gray-50 rounded"><span className="text-gray-500 block mb-1">Date</span><strong>{formatDate(viewIrn.date)}</strong></div>
-              <div className="p-3 bg-gray-50 rounded sm:col-span-2"><span className="text-gray-500 block mb-1">IRN (Invoice Reference Number)</span><strong className="font-mono text-xs break-all">{viewIrn.irn}</strong></div>
-              <div className="p-3 bg-gray-50 rounded"><span className="text-gray-500 block mb-1">Ack Number</span><strong>{viewIrn.ackNo}</strong></div>
-              <div className="p-3 bg-gray-50 rounded"><span className="text-gray-500 block mb-1">Ack Date</span><strong>{viewIrn.ackDate ? formatDate(viewIrn.ackDate) : "—"}</strong></div>
-              <div className="p-3 bg-gray-50 rounded"><span className="text-gray-500 block mb-1">Status</span><Badge variant="success">{viewIrn.einvoiceStatus}</Badge></div>
-              <div className="p-3 bg-gray-50 rounded"><span className="text-gray-500 block mb-1">API Source</span><Badge variant="info">{viewIrn.apiSource || "local"}</Badge></div>
-              <div className="p-3 bg-gray-50 rounded sm:col-span-2"><span className="text-gray-500 block mb-1">Signed QR Code</span><span className="font-mono text-xs break-all">{viewIrn.signedQRCode || "—"}</span></div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-500">IRP-compatible e-Invoice JSON format</span>
+              <Button size="sm" variant="secondary" onClick={() => downloadJSON([viewJson.invoice])}><Icons.download size={14} /> Download This</Button>
             </div>
-            <p className="text-xs text-gray-400">Data fetched via: GET /eInvoice/v1.03/eInvoice/irn/{"{irn}"}</p>
+            <pre className="bg-gray-900 text-gray-100 rounded-lg p-4 text-xs overflow-auto max-h-[50vh] font-mono leading-relaxed">{JSON.stringify(viewJson.json, null, 2)}</pre>
           </div>
         )}
       </Modal>
     </div>
   );
 };
-
-
-
-
